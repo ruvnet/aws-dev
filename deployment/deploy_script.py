@@ -2,7 +2,7 @@ import os
 import subprocess
 import json
 import boto3
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from pydantic import BaseModel
 from typing import Optional, List
 from botocore.exceptions import ClientError
@@ -14,6 +14,16 @@ class DeployRequest(BaseModel):
     image_tag: str
     python_script: str
     requirements: str
+    function_name: str
+    vpc_id: Optional[str] = None
+    subnet_ids: Optional[List[str]] = None
+    security_group_ids: Optional[List[str]] = None
+
+class AdvancedDeployRequest(BaseModel):
+    repository_name: str
+    image_tag: str
+    base_image: str
+    build_commands: List[str]
     function_name: str
     vpc_id: Optional[str] = None
     subnet_ids: Optional[List[str]] = None
@@ -165,6 +175,114 @@ async def deploy(request: DeployRequest):
                 )
 
         return {"message": "Deployment successful", "image_uri": f"{ecr_uri}/{image_name}", "lambda_arn": response['FunctionArn']}
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/advanced-deploy")
+async def advanced_deploy(request: AdvancedDeployRequest, files: List[UploadFile] = File(...)):
+    try:
+        # Ensure Docker is running
+        docker_running = subprocess.run(["docker", "info"], capture_output=True, text=True)
+        if docker_running.returncode != 0:
+            raise HTTPException(status_code=500, detail="Docker daemon is not running. Please start Docker daemon.")
+
+        # Ensure AWS CLI is installed
+        aws_cli_installed = subprocess.run(["aws", "--version"], capture_output=True, text=True)
+        if aws_cli_installed.returncode != 0:
+            await install_aws_cli()
+
+        # Save uploaded files
+        for file in files:
+            file_location = f"./{file.filename}"
+            with open(file_location, "wb+") as file_object:
+                file_object.write(file.file.read())
+
+        # Create Dockerfile with advanced options
+        dockerfile_content = f"""
+        FROM {request.base_image}
+        """
+        for command in request.build_commands:
+            dockerfile_content += f"\nRUN {command}"
+        dockerfile_content += "\nCOPY . ."
+        dockerfile_content += '\nCMD ["app.lambda_handler"]'
+
+        with open("Dockerfile", "w") as f:
+            f.write(dockerfile_content)
+
+        # Build the Docker image
+        image_name = f"{request.repository_name}:{request.image_tag}"
+        build_result = subprocess.run(["docker", "build", "-t", image_name, "."], capture_output=True, text=True)
+
+        if build_result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Docker build failed: {build_result.stderr}")
+
+        # Authenticate Docker to AWS ECR
+        region = "us-west-2"  # Change to your desired region
+        account_id = boto3.client('sts').get_caller_identity().get('Account')
+        ecr_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com"
+        
+        login_password = subprocess.run(
+            ["aws", "ecr", "get-login-password", "--region", region], 
+            capture_output=True, text=True, check=True
+        ).stdout.strip()
+        
+        login_result = subprocess.run(
+            ["docker", "login", "--username", "AWS", "--password-stdin", ecr_uri],
+            input=login_password, text=True, capture_output=True
+        )
+
+        if login_result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Docker login failed: {login_result.stderr}")
+
+        # Create ECR repository if it doesn't exist
+        ecr_client = boto3.client('ecr', region_name=region)
+        try:
+            ecr_client.create_repository(repositoryName=request.repository_name)
+        except ecr_client.exceptions.RepositoryAlreadyExistsException:
+            pass
+
+        # Tag and push the Docker image to ECR
+        subprocess.run(["docker", "tag", image_name, f"{ecr_uri}/{image_name}"], check=True)
+        subprocess.run(["docker", "push", f"{ecr_uri}/{image_name}"], check=True)
+
+        # Create or update the Lambda function
+        role_name = "lambda-execution-role"
+        role_arn = await ensure_iam_role(role_name, account_id)
+        
+        lambda_client = boto3.client('lambda', region_name=region)
+        function_name = request.function_name
+        try:
+            response = lambda_client.create_function(
+                FunctionName=function_name,
+                Role=role_arn,
+                Code={
+                    'ImageUri': f"{ecr_uri}/{image_name}"
+                },
+                PackageType='Image',
+                Publish=True,
+                VpcConfig={
+                    'SubnetIds': request.subnet_ids or [],
+                    'SecurityGroupIds': request.security_group_ids or []
+                } if request.vpc_id else {}
+            )
+        except lambda_client.exceptions.ResourceConflictException:
+            response = lambda_client.update_function_code(
+                FunctionName=function_name,
+                ImageUri=f"{ecr_uri}/{image_name}",
+                Publish=True
+            )
+            if request.vpc_id:
+                lambda_client.update_function_configuration(
+                    FunctionName=function_name,
+                    VpcConfig={
+                        'SubnetIds': request.subnet_ids or [],
+                        'SecurityGroupIds': request.security_group_ids or []
+                    }
+                )
+
+        return {"message": "Advanced deployment successful", "image_uri": f"{ecr_uri}/{image_name}", "lambda_arn": response['FunctionArn']}
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
