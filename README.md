@@ -5,10 +5,9 @@ _______|    |   ___  __
  |  | \|    |  / \   / 
  |__|  |______/   \_/  
                        
+ Optimized VS Code and Code Spaces
 ```
 # AWS Serverless Ai Dev Environment
-## Optimized VS Code and Code Spaces
-
 This repository provides a fully configured development environment optimized for working with AWS services, including serverless Lambda deployments, using GitHub Codespaces. It includes the AWS CLI, AWS SAM CLI, Boto3, and additional tools necessary for serverless development.
 
 Created by **Reuven Cohen (rUv)**, this environment is designed to streamline and optimize the deployment of AWS Lambda functions with optional VPC configurations.
