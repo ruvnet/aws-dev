@@ -1,7 +1,12 @@
-# AWS Dev Container 
-### by rUv
+# AWS Dev Container
 
 This repository provides a fully configured development environment optimized for working with AWS services, including serverless Lambda deployments, using GitHub Codespaces. It includes the AWS CLI, AWS SAM CLI, Boto3, and additional tools necessary for serverless development.
+
+Created by **Reuven Cohen (rUv)**, this environment is designed to streamline and optimize the deployment of AWS Lambda functions with optional VPC configurations.
+
+## Purpose
+
+The purpose of this repository is to provide a ready-to-use development setup that simplifies the process of developing, testing, and deploying serverless applications on AWS. By leveraging GitHub Codespaces and Docker, developers can ensure consistency across different development environments and accelerate their workflow.
 
 ## Features
 
@@ -73,8 +78,8 @@ The repository includes a `.devcontainer` folder with the necessary configuratio
     "ms-azuretools.vscode-docker",
     "amazonwebservices.aws-sam-cli-toolkit"
   ],
-  "postCreateCommand": "aws --version && sam --version",
-  "forwardPorts": [3000],
+  "postCreateCommand": "aws --version && sam --version && gh --version",
+  "forwardPorts": [8000],
   "remoteUser": "vscode",
   "remoteEnv": {
     "AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
@@ -103,11 +108,18 @@ RUN apt-get update && apt-get install -y \
     docker.io \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
-# Install Boto3
-RUN pip3 install boto3
+# Install Boto3 and FastAPI dependencies
+RUN pip3 install boto3 fastapi pydantic uvicorn
 
 # Install AWS SAM CLI
 RUN pip3 install aws-sam-cli
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    sudo apt update && \
+    sudo apt install -y gh
 
 # Set the default shell to bash
 SHELL ["/bin/bash", "-c"]
@@ -116,27 +128,28 @@ SHELL ["/bin/bash", "-c"]
 USER vscode
 ```
 
-### Step 4: Launch Codespace
+### Step 4: Run the Deployment Script
 
-1. Push your changes to GitHub:
-   ```sh
-   git add .devcontainer/
-   git commit -m "Add dev container configuration with Boto3 and AWS SAM CLI"
-   git push origin main
-   ```
+1. **Start the FastAPI Server**:
+    ```bash
+    uvicorn deployment.deploy_script:app --reload
+    ```
 
-2. Go to your repository on GitHub.
-3. Click on the green "Code" button and select "Open with Codespaces".
-4. If you don't see the option, make sure you have access to GitHub Codespaces.
+2. **Deploy via API Call**:
+    Use a tool like `curl` or Postman to send a POST request to the `/deploy` endpoint with the required payload.
 
-### Step 5: Verify Setup
-
-Once the Codespace is up and running, verify the AWS CLI and SAM CLI installations by running:
-
-```sh
-aws --version
-sam --version
-```
+    Example payload:
+    ```json
+    {
+        "repository_name": "my-repo",
+        "image_tag": "latest",
+        "python_script": "def lambda_handler(event, context): return {'statusCode': 200, 'body': 'Hello, World!'}",
+        "requirements": "requests\n",
+        "vpc_id": "vpc-12345678",
+        "subnet_ids": ["subnet-12345678", "subnet-87654321"],
+        "security_group_ids": ["sg-12345678"]
+    }
+    ```
 
 ### Example Project Structure
 
@@ -147,11 +160,135 @@ The repository includes an example serverless application structure to get you s
 ├── .devcontainer
 │   ├── devcontainer.json
 │   └── Dockerfile
+├── deployment
+│   ├── deploy_script.py
+│   ├── requirements.txt
 ├── hello_world
 │   ├── app.py
 │   ├── requirements.txt
 ├── template.yaml
 └── README.md
+```
+
+#### deployment/deploy_script.py
+
+```python
+import os
+import subprocess
+import boto3
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import Optional, List
+
+app = FastAPI()
+
+class DeployRequest(BaseModel):
+    repository_name: str
+    image_tag: str
+    python_script: str
+    requirements: str
+    vpc_id: Optional[str] = None
+    subnet_ids: Optional[List[str]] = None
+    security_group_ids: Optional[List[str]] = None
+
+@app.post("/deploy")
+def deploy(request: DeployRequest):
+    # Step 1: Create a virtual environment
+    os.system("python3 -m venv venv")
+    os.system("source venv/bin/activate")
+    
+    # Step 2: Write the Python script to a file
+    with open("app.py", "w") as f:
+        f.write(request.python_script)
+    
+    # Step 3: Write the requirements to a file
+    with open("requirements.txt", "w") as f:
+        f.write(request.requirements)
+    
+    # Step 4: Install dependencies
+    os.system("venv/bin/pip install -r requirements.txt")
+    
+    # Step 5: Create a Dockerfile
+    dockerfile_content = f"""
+    FROM public.ecr.aws/lambda/python:3.8
+    COPY requirements.txt .
+    RUN pip install -r requirements.txt
+    COPY app.py .
+    CMD ["app.lambda_handler"]
+    """
+    with open("Dockerfile", "w") as f:
+        f.write(dockerfile_content)
+    
+    # Step 6: Build the Docker image
+    image_name = f"{request.repository_name}:{request.image_tag}"
+    os.system(f"docker build -t {image_name} .")
+    
+    # Step 7: Authenticate Docker to AWS ECR
+    region = "us-west-2"  # Change to your desired region
+    account_id = boto3.client('sts').get_caller_identity().get('Account')
+    ecr_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com"
+    os.system(f"aws ecr get-login-password --region {region} | docker login --username AWS --password-stdin {ecr_uri}")
+    
+    # Step 8: Create ECR repository if it doesn't exist
+    ecr_client = boto3.client('ecr', region_name=region)
+    try:
+        ecr_client.create_repository(repositoryName=request.repository_name)
+    except ecr_client.exceptions.RepositoryAlreadyExistsException:
+        pass
+    
+    # Step 9: Tag and push the Docker image to ECR
+    os.system(f"docker tag {image_name} {ecr_uri}/{image_name}")
+    os.system(f"docker push {ecr_uri}/{image_name}")
+    
+    # Step 10: Create or update the Lambda function
+    lambda_client = boto3.client('lambda', region_name=region)
+    function_name = "my-lambda-function"
+    try:
+        response = lambda_client.create_function(
+            FunctionName=function_name,
+            Role=f"arn:aws:iam::{account_id}:role/lambda-execution-role",
+            Code={
+                'ImageUri': f"{ecr_uri}/{image_name}"
+            },
+            PackageType='Image',
+            Publish=True,
+            VpcConfig={
+                'Subnet
+
+Ids': request.subnet_ids or [],
+                'SecurityGroupIds': request.security_group_ids or []
+            } if request.vpc_id else {}
+        )
+    except lambda_client.exceptions.ResourceConflictException:
+        response = lambda_client.update_function_code(
+            FunctionName=function_name,
+            ImageUri=f"{ecr_uri}/{image_name}",
+            Publish=True
+        )
+        if request.vpc_id:
+            lambda_client.update_function_configuration(
+                FunctionName=function_name,
+                VpcConfig={
+                    'SubnetIds': request.subnet_ids or [],
+                    'SecurityGroupIds': request.security_group_ids or []
+                }
+            )
+    
+    return {"message": "Deployment successful", "image_uri": f"{ecr_uri}/{image_name}", "lambda_arn": response['FunctionArn']}
+
+# Run the FastAPI app
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+#### deployment/requirements.txt
+
+```txt
+boto3
+fastapi
+pydantic
+uvicorn
 ```
 
 #### hello_world/app.py
