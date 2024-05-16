@@ -39,8 +39,8 @@ Ensure you have the following:
 Clone this repository to your local machine:
 
 ```sh
-git clone https://github.com/ruvnet/your-repository.git
-cd your-repository
+git clone https://github.com/ruvnet/aws-dev.git
+cd aws-dev
 ```
 
 ### Step 2: Configure AWS Credentials
