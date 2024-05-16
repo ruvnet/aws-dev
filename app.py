@@ -1,1 +1,1 @@
-def lambda_handler(event, context): return {"statusCode": 200, "body": "Hello, world!"}
+def lambda_handler(event, context): return {"statusCode": 200, "body": "🤪 Hello, rUv!"}

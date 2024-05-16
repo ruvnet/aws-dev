@@ -5,6 +5,7 @@ import boto3
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
+from botocore.exceptions import ClientError
 
 app = FastAPI()
 
@@ -18,13 +19,18 @@ class DeployRequest(BaseModel):
     subnet_ids: Optional[List[str]] = None
     security_group_ids: Optional[List[str]] = None
 
-def install_aws_cli():
+class VpcConfig(BaseModel):
+    vpc_id: str
+    subnet_ids: List[str]
+    security_group_ids: List[str]
+
+async def install_aws_cli():
     subprocess.run(["curl", "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip", "-o", "awscliv2.zip"], check=True)
     subprocess.run(["unzip", "awscliv2.zip"], check=True)
     subprocess.run(["sudo", "./aws/install"], check=True)
     subprocess.run(["rm", "-rf", "awscliv2.zip", "aws"], check=True)
 
-def ensure_iam_role(role_name, account_id):
+async def ensure_iam_role(role_name, account_id):
     iam_client = boto3.client('iam')
     role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
     try:
@@ -50,7 +56,7 @@ def ensure_iam_role(role_name, account_id):
     return role_arn
 
 @app.post("/deploy")
-def deploy(request: DeployRequest):
+async def deploy(request: DeployRequest):
     try:
         # Ensure Docker is running
         docker_running = subprocess.run(["docker", "info"], capture_output=True, text=True)
@@ -60,7 +66,7 @@ def deploy(request: DeployRequest):
         # Ensure AWS CLI is installed
         aws_cli_installed = subprocess.run(["aws", "--version"], capture_output=True, text=True)
         if aws_cli_installed.returncode != 0:
-            install_aws_cli()
+            await install_aws_cli()
 
         # Step 1: Create a virtual environment
         subprocess.run(["python3", "-m", "venv", "venv"], check=True)
@@ -125,7 +131,7 @@ def deploy(request: DeployRequest):
 
         # Step 10: Create or update the Lambda function
         role_name = "lambda-execution-role"
-        role_arn = ensure_iam_role(role_name, account_id)
+        role_arn = await ensure_iam_role(role_name, account_id)
         
         lambda_client = boto3.client('lambda', region_name=region)
         function_name = request.function_name
@@ -165,7 +171,7 @@ def deploy(request: DeployRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/invoke-lambda")
-def invoke_lambda(function_name: str):
+async def invoke_lambda(function_name: str):
     try:
         # Initialize boto3 Lambda client
         region = "us-west-2"  # Change to your desired region
@@ -186,7 +192,7 @@ def invoke_lambda(function_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/list-lambda-functions")
-def list_lambda_functions():
+async def list_lambda_functions():
     try:
         # Initialize boto3 Lambda client
         region = "us-west-2"  # Change to your desired region
@@ -200,6 +206,81 @@ def list_lambda_functions():
         function_names = [func['FunctionName'] for func in functions]
 
         return {"functions": function_names}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete-lambda-function")
+async def delete_lambda_function(function_name: str):
+    try:
+        # Initialize boto3 Lambda client
+        region = "us-west-2"  # Change to your desired region
+        lambda_client = boto3.client('lambda', region_name=region)
+        
+        # Delete the Lambda function
+        lambda_client.delete_function(FunctionName=function_name)
+
+        return {"message": f"Lambda function {function_name} deleted successfully."}
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/list-ecr-repositories")
+async def list_ecr_repositories():
+    try:
+        # Initialize boto3 ECR client
+        region = "us-west-2"  # Change to your desired region
+        ecr_client = boto3.client('ecr', region_name=region)
+        
+        # List ECR repositories
+        response = ecr_client.describe_repositories()
+        repositories = response['repositories']
+
+        return {"repositories": repositories}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete-ecr-repository")
+async def delete_ecr_repository(repository_name: str):
+    try:
+        # Initialize boto3 ECR client
+        region = "us-west-2"  # Change to your desired region
+        ecr_client = boto3.client('ecr', region_name=region)
+        
+        # Delete the ECR repository
+        ecr_client.delete_repository(repositoryName=repository_name, force=True)
+
+        return {"message": f"ECR repository {repository_name} deleted successfully."}
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/set-vpc-config")
+async def set_vpc_config(vpc_config: VpcConfig):
+    try:
+        # Here you would typically store the VPC config in a database or use it directly
+        # For demonstration, we just return the config
+        return {"message": "VPC configuration set successfully", "vpc_config": vpc_config}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/edit-vpc-config")
+async def edit_vpc_config(vpc_config: VpcConfig):
+    try:
+        # Here you would typically update the VPC config in a database or use it directly
+        # For demonstration, we just return the config
+        return {"message": "VPC configuration updated successfully", "vpc_config": vpc_config}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/get-vpc-config")
+async def get_vpc_config():
+    try:
+        # Here you would typically retrieve the VPC config from a database
+        # For demonstration, we just return a mock config
+        mock_vpc_config = {
+            "vpc_id": "vpc-12345678",
+            "subnet_ids": ["subnet-12345678", "subnet-87654321"],
+            "security_group_ids": ["sg-12345678", "sg-87654321"]
+        }
+        return {"vpc_config": mock_vpc_config}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
