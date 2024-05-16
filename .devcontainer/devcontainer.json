@@ -8,10 +8,15 @@
     "terminal.integrated.shell.linux": "/bin/bash"
   },
   "extensions": [
+    "amazonwebservices.aws-toolkit-vscode",
+    "kddejong.vscode-cfn-lint",
+    "redhat.vscode-yaml",
+    "hashicorp.terraform",
+    "ms-python.python",
     "ms-azuretools.vscode-docker",
-    "amazonwebservices.aws-toolkit-vscode"
+    "amazonwebservices.aws-sam-cli-toolkit"
   ],
-  "postCreateCommand": "aws --version",
+  "postCreateCommand": "aws --version && sam --version",
   "forwardPorts": [3000],
   "remoteUser": "vscode",
   "remoteEnv": {
