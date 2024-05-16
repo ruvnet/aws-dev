@@ -1,0 +1,28 @@
+{
+  "name": "AWS Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash",
+    "python.pythonPath": "/workspaces/aws-dev/.venv/bin/python"
+  },
+  "extensions": [
+    "amazonwebservices.aws-toolkit-vscode",
+    "kddejong.vscode-cfn-lint",
+    "redhat.vscode-yaml",
+    "hashicorp.terraform",
+    "ms-python.python",
+    "ms-azuretools.vscode-docker",
+    "amazonwebservices.aws-sam-cli-toolkit"
+  ],
+  "postCreateCommand": "python3 -m venv .venv && . .venv/bin/activate && pip install --upgrade pip && pip install -r deployment/requirements.txt -r hello_world/requirements.txt",
+  "forwardPorts": [8000],
+  "remoteUser": "vscode",
+  "remoteEnv": {
+    "AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
+    "AWS_SECRET_ACCESS_KEY": "${localEnv:AWS_SECRET_ACCESS_KEY}",
+    "AWS_DEFAULT_REGION": "${localEnv:AWS_DEFAULT_REGION}"
+  }
+}
