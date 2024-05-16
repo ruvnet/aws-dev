@@ -1,5 +1,9 @@
 {
   "name": "AWS Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
   "settings": {
     "terminal.integrated.shell.linux": "/bin/bash",
     "python.pythonPath": "/workspaces/aws-dev/.venv/bin/python"
