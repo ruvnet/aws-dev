@@ -1,0 +1,9 @@
+{
+  "repository_name": "hello-world-repo",
+  "image_tag": "latest",
+  "python_script": "def lambda_handler(event, context): return {\"statusCode\": 200, \"body\": \"Hello, world!\"}",
+  "requirements": "",
+  "vpc_id": "",
+  "subnet_ids": [],
+  "security_group_ids": []
+}
