@@ -13,6 +13,7 @@ class DeployRequest(BaseModel):
     image_tag: str
     python_script: str
     requirements: str
+    function_name: str
     vpc_id: Optional[str] = None
     subnet_ids: Optional[List[str]] = None
     security_group_ids: Optional[List[str]] = None
@@ -127,7 +128,7 @@ def deploy(request: DeployRequest):
         role_arn = ensure_iam_role(role_name, account_id)
         
         lambda_client = boto3.client('lambda', region_name=region)
-        function_name = "my-lambda-function"
+        function_name = request.function_name
         try:
             response = lambda_client.create_function(
                 FunctionName=function_name,
@@ -205,4 +206,4 @@ def list_lambda_functions():
 # Run the FastAPI app
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)

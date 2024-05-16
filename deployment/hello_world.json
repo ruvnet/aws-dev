@@ -3,6 +3,7 @@
   "image_tag": "latest",
   "python_script": "def lambda_handler(event, context): return {\"statusCode\": 200, \"body\": \"Hello, world!\"}",
   "requirements": "",
+  "function_name": "HelloWorld",
   "vpc_id": "",
   "subnet_ids": [],
   "security_group_ids": []
