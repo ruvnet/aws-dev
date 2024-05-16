@@ -76,7 +76,8 @@ The repository includes a `.devcontainer` folder with the necessary configuratio
     "context": "."
   },
   "settings": {
-    "terminal.integrated.shell.linux": "/bin/bash"
+    "terminal.integrated.shell.linux": "/bin/bash",
+    "python.pythonPath": "/workspaces/aws-dev/.venv/bin/python"
   },
   "extensions": [
     "amazonwebservices.aws-toolkit-vscode",
@@ -87,7 +88,7 @@ The repository includes a `.devcontainer` folder with the necessary configuratio
     "ms-azuretools.vscode-docker",
     "amazonwebservices.aws-sam-cli-toolkit"
   ],
-  "postCreateCommand": "aws --version && sam --version && gh --version",
+  "postCreateCommand": "python3 -m venv .venv && . .venv/bin/activate && pip install --upgrade pip && pip install -r deployment/requirements.txt -r hello_world/requirements.txt",
   "forwardPorts": [8000],
   "remoteUser": "vscode",
   "remoteEnv": {
@@ -106,22 +107,40 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-buster
 # Install AWS CLI
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
     unzip awscliv2.zip && \
-    sudo ./aws/install && \
+    ./aws/install && \
     rm -rf awscliv2.zip ./aws
 
-# Install other dependencies if needed
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     jq \
     python3 \
     python3-pip \
+    python3-distutils \
+    python3-venv \
     docker.io \
+    build-essential \
+    curl \
+    sudo \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
-# Install Boto3 and FastAPI dependencies
-RUN pip3 install boto3 fastapi pydantic uvicorn
+# Manually install pip (if needed)
+RUN curl -O https://bootstrap.pypa.io/get-pip.py && \
+    python3 get-pip.py && \
+    rm get-pip.py
+
+# Install Rust (needed for maturin)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install maturin with specific version and other dependencies
+RUN pip install --upgrade pip && \
+    pip install maturin==1.0.0 typing-extensions==4.6.3
+
+# Install other Python dependencies
+RUN pip install boto3 fastapi pydantic uvicorn
 
 # Install AWS SAM CLI
-RUN pip3 install aws-sam-cli
+RUN pip install aws-sam-cli
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
@@ -129,6 +148,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | s
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
     sudo apt update && \
     sudo apt install -y gh
+
+# Ensure pip is available globally
+RUN ln -s /usr/bin/pip3 /usr/bin/pip
 
 # Set the default shell to bash
 SHELL ["/bin/bash", "-c"]
