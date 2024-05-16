@@ -188,15 +188,21 @@ The repository includes an example serverless application structure to get you s
 
 ```
 .
+.
 ├── .devcontainer
 │   ├── devcontainer.json
 │   └── Dockerfile
+├── .gitignore
 ├── deployment
 │   ├── deploy_script.py
 │   ├── requirements.txt
 ├── hello_world
 │   ├── app.py
 │   ├── requirements.txt
+├── scripts
+│   ├── get-pip.py
+│   ├── rust.sh
+│   ├── setup.sh
 ├── template.yaml
 └── README.md
 ```
