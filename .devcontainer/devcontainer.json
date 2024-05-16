@@ -5,7 +5,8 @@
     "context": "."
   },
   "settings": {
-    "terminal.integrated.shell.linux": "/bin/bash"
+    "terminal.integrated.shell.linux": "/bin/bash",
+    "python.pythonPath": "/workspaces/aws-dev/.venv/bin/python"
   },
   "extensions": [
     "amazonwebservices.aws-toolkit-vscode",
@@ -16,7 +17,7 @@
     "ms-azuretools.vscode-docker",
     "amazonwebservices.aws-sam-cli-toolkit"
   ],
-  "postCreateCommand": "aws --version && sam --version && gh --version && python3 -m venv .venv && .venv/bin/pip install -r deployment/requirements.txt -r hello_world/requirements.txt",
+  "postCreateCommand": "aws --version && sam --version && gh --version && python3 -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -r deployment/requirements.txt -r hello_world/requirements.txt",
   "forwardPorts": [8000],
   "remoteUser": "vscode",
   "remoteEnv": {

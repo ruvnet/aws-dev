@@ -4,7 +4,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-buster
 # Install AWS CLI
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
     unzip awscliv2.zip && \
-    sudo ./aws/install && \
+    ./aws/install && \
     rm -rf awscliv2.zip ./aws
 
 # Install system dependencies
@@ -17,9 +17,10 @@ RUN apt-get update && apt-get install -y \
     docker.io \
     build-essential \
     curl \
+    sudo \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
-# Manually install pip
+# Manually install pip (if needed)
 RUN curl -O https://bootstrap.pypa.io/get-pip.py && \
     python3 get-pip.py && \
     rm get-pip.py
@@ -28,8 +29,11 @@ RUN curl -O https://bootstrap.pypa.io/get-pip.py && \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install Boto3 and FastAPI dependencies
-RUN pip install maturin==1.0.0 typing-extensions==4.6.3
+# Install maturin with specific version and other dependencies
+RUN pip install --upgrade pip && \
+    pip install maturin==1.0.0 typing-extensions==4.6.3
+
+# Install other Python dependencies
 RUN pip install boto3 fastapi pydantic uvicorn
 
 # Install AWS SAM CLI
