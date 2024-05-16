@@ -1,5 +1,6 @@
 import os
 import subprocess
+import json
 import boto3
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -158,6 +159,47 @@ def deploy(request: DeployRequest):
 
         return {"message": "Deployment successful", "image_uri": f"{ecr_uri}/{image_name}", "lambda_arn": response['FunctionArn']}
     except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/invoke-lambda")
+def invoke_lambda(function_name: str):
+    try:
+        # Initialize boto3 Lambda client
+        region = "us-west-2"  # Change to your desired region
+        lambda_client = boto3.client('lambda', region_name=region)
+        
+        # Invoke the Lambda function
+        response = lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType='RequestResponse'
+        )
+        
+        # Parse the response
+        response_payload = response['Payload'].read().decode('utf-8')
+        response_data = json.loads(response_payload)
+
+        return response_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/list-lambda-functions")
+def list_lambda_functions():
+    try:
+        # Initialize boto3 Lambda client
+        region = "us-west-2"  # Change to your desired region
+        lambda_client = boto3.client('lambda', region_name=region)
+        
+        # List Lambda functions
+        response = lambda_client.list_functions()
+        functions = response['Functions']
+
+        # Extract function names
+        function_names = [func['FunctionName'] for func in functions]
+
+        return {"functions": function_names}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # Run the FastAPI app
