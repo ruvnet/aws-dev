@@ -1,4 +1,4 @@
-# AWS Dev Container
+# AWS Serverless Ai Dev Enviroment for VS Code and Code Spaces
 
 This repository provides a fully configured development environment optimized for working with AWS services, including serverless Lambda deployments, using GitHub Codespaces. It includes the AWS CLI, AWS SAM CLI, Boto3, and additional tools necessary for serverless development.
 
