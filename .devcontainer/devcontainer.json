@@ -16,8 +16,8 @@
     "ms-azuretools.vscode-docker",
     "amazonwebservices.aws-sam-cli-toolkit"
   ],
-  "postCreateCommand": "aws --version && sam --version",
-  "forwardPorts": [3000],
+  "postCreateCommand": "aws --version && sam --version && gh --version",
+  "forwardPorts": [8000],
   "remoteUser": "vscode",
   "remoteEnv": {
     "AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
