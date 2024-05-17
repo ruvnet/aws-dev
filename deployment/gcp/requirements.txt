@@ -1,0 +1,13 @@
+fastapi==0.95.2
+uvicorn==0.22.0
+google-cloud-functions==1.1.0
+google-cloud-storage==2.10.0
+google-cloud-iam==2.8.1
+google-cloud-vpcaccess==0.3.0
+google-cloud-logging==3.5.0
+google-cloud-monitoring==2.14.0
+google-cloud-container==2.12.0
+google-cloud-billing==1.7.1
+google-auth==2.23.4
+requests==2.31.0
+pydantic==1.10.2
