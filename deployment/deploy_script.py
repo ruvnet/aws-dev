@@ -2,12 +2,14 @@ import os
 import subprocess
 import json
 import boto3
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, APIRouter
 from pydantic import BaseModel
 from typing import Optional, List
 from botocore.exceptions import ClientError
 
 app = FastAPI()
+router = APIRouter()
+misc_router = APIRouter()
 
 class DeployRequest(BaseModel):
     repository_name: str
@@ -15,6 +17,7 @@ class DeployRequest(BaseModel):
     python_script: str
     requirements: str
     function_name: str
+    region: Optional[str] = None
     vpc_id: Optional[str] = None
     subnet_ids: Optional[List[str]] = None
     security_group_ids: Optional[List[str]] = None
@@ -25,6 +28,7 @@ class AdvancedDeployRequest(BaseModel):
     base_image: str
     build_commands: List[str]
     function_name: str
+    region: Optional[str] = None
     vpc_id: Optional[str] = None
     subnet_ids: Optional[List[str]] = None
     security_group_ids: Optional[List[str]] = None
@@ -33,6 +37,37 @@ class VpcConfig(BaseModel):
     vpc_id: str
     subnet_ids: List[str]
     security_group_ids: List[str]
+
+class FunctionConfig(BaseModel):
+    repository_name: str
+    image_tag: str
+    function_name_prefix: str
+    number_of_functions: int
+    vpc_id: str
+    subnet_ids: List[str]
+    security_group_ids: List[str]
+    region: Optional[str] = None 
+    log_retention_days: Optional[int] = 7
+
+class InvokeConfig(BaseModel):
+    function_name_prefix: str
+    number_of_functions: int
+    payload: dict
+    region: Optional[str] = None
+
+class TimePeriod(BaseModel):
+    Start: str
+    End: str
+
+class BudgetRequest(BaseModel):
+    AccountId: str
+    BudgetName: str
+class UpdateFunctionConfig(BaseModel):
+    function_name: str
+    memory_size: Optional[int] = None
+    timeout: Optional[int] = None
+    environment_variables: Optional[dict] = None
+    region: Optional[str] = None
 
 async def install_aws_cli():
     subprocess.run(["curl", "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip", "-o", "awscliv2.zip"], check=True)
@@ -65,6 +100,7 @@ async def ensure_iam_role(role_name, account_id):
         )
     return role_arn
 
+# Deployment endpoints
 @app.post("/deploy")
 async def deploy(request: DeployRequest):
     try:
@@ -111,7 +147,7 @@ async def deploy(request: DeployRequest):
             raise HTTPException(status_code=500, detail=f"Docker build failed: {build_result.stderr}")
 
         # Step 7: Authenticate Docker to AWS ECR
-        region = "us-west-2"  # Change to your desired region
+        region = request.region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
         account_id = boto3.client('sts').get_caller_identity().get('Account')
         ecr_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com"
         
@@ -154,6 +190,10 @@ async def deploy(request: DeployRequest):
                 },
                 PackageType='Image',
                 Publish=True,
+                MemorySize=request.memory_size if request.memory_size else 128,
+                EphemeralStorage={
+                    'Size': request.storage_size if request.storage_size else 512
+                },
                 VpcConfig={
                     'SubnetIds': request.subnet_ids or [],
                     'SecurityGroupIds': request.security_group_ids or []
@@ -168,6 +208,10 @@ async def deploy(request: DeployRequest):
             if request.vpc_id:
                 lambda_client.update_function_configuration(
                     FunctionName=function_name,
+                    MemorySize=request.memory_size if request.memory_size else 128,
+                    EphemeralStorage={
+                        'Size': request.storage_size if request.storage_size else 512
+                    },
                     VpcConfig={
                         'SubnetIds': request.subnet_ids or [],
                         'SecurityGroupIds': request.security_group_ids or []
@@ -219,7 +263,7 @@ async def advanced_deploy(request: AdvancedDeployRequest, files: List[UploadFile
             raise HTTPException(status_code=500, detail=f"Docker build failed: {build_result.stderr}")
 
         # Authenticate Docker to AWS ECR
-        region = "us-west-2"  # Change to your desired region
+        region = request.region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
         account_id = boto3.client('sts').get_caller_identity().get('Account')
         ecr_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com"
         
@@ -262,6 +306,10 @@ async def advanced_deploy(request: AdvancedDeployRequest, files: List[UploadFile
                 },
                 PackageType='Image',
                 Publish=True,
+                MemorySize=request.memory_size if request.memory_size else 128,
+                EphemeralStorage={
+                    'Size': request.storage_size if request.storage_size else 512
+                },
                 VpcConfig={
                     'SubnetIds': request.subnet_ids or [],
                     'SecurityGroupIds': request.security_group_ids or []
@@ -276,6 +324,10 @@ async def advanced_deploy(request: AdvancedDeployRequest, files: List[UploadFile
             if request.vpc_id:
                 lambda_client.update_function_configuration(
                     FunctionName=function_name,
+                    MemorySize=request.memory_size if request.memory_size else 128,
+                    EphemeralStorage={
+                        'Size': request.storage_size if request.storage_size else 512
+                    },
                     VpcConfig={
                         'SubnetIds': request.subnet_ids or [],
                         'SecurityGroupIds': request.security_group_ids or []
@@ -288,11 +340,96 @@ async def advanced_deploy(request: AdvancedDeployRequest, files: List[UploadFile
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/deploy-multiple-functions")
+async def deploy_multiple_functions(config: FunctionConfig):
+    try:
+        # Initialize AWS clients
+        account_id = boto3.client('sts').get_caller_identity().get('Account')
+        region = config.region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+        ecr_client = boto3.client('ecr', region_name=region)
+        lambda_client = boto3.client('lambda', region_name=region)
+        logs_client = boto3.client('logs', region_name=region)
+        sns_client = boto3.client('sns', region_name=region)
+
+        # Ensure the IAM role exists
+        role_name = "lambda-execution-role"
+        role_arn = await ensure_iam_role(role_name, account_id)
+
+        # Authenticate Docker to AWS ECR
+        ecr_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com"
+        login_password = subprocess.run(
+            ["aws", "ecr", "get-login-password", "--region", region],
+            capture_output=True, text=True, check=True
+        ).stdout.strip()
+        
+        subprocess.run(
+            ["docker", "login", "--username", "AWS", "--password-stdin", ecr_uri],
+            input=login_password, text=True, capture_output=True
+        )
+
+        # Ensure ECR repository exists
+        try:
+            ecr_client.create_repository(repositoryName=config.repository_name)
+        except ecr_client.exceptions.RepositoryAlreadyExistsException:
+            pass
+
+        # Deploy multiple Lambda functions
+        for i in range(config.number_of_functions):
+            function_name = f"{config.function_name_prefix}-{i}"
+            image_name = f"{config.repository_name}:{config.image_tag}"
+
+            try:
+                response = lambda_client.create_function(
+                    FunctionName=function_name,
+                    Role=role_arn,
+                    Code={'ImageUri': f"{ecr_uri}/{image_name}"},
+                    PackageType='Image',
+                    Publish=True,
+                    MemorySize=config.memory_size,
+                    EphemeralStorage={'Size': config.storage_size},
+                    VpcConfig={
+                        'SubnetIds': config.subnet_ids,
+                        'SecurityGroupIds': config.security_group_ids
+                    }
+                )
+
+                # Set up CloudWatch Logs retention
+                log_group_name = f"/aws/lambda/{function_name}"
+                try:
+                    logs_client.create_log_group(logGroupName=log_group_name)
+                except logs_client.exceptions.ResourceAlreadyExistsException:
+                    pass
+
+                logs_client.put_retention_policy(
+                    logGroupName=log_group_name,
+                    retentionInDays=config.log_retention_days
+                )
+
+            except lambda_client.exceptions.ResourceConflictException:
+                lambda_client.update_function_code(
+                    FunctionName=function_name,
+                    ImageUri=f"{ecr_uri}/{image_name}",
+                    Publish=True
+                )
+                lambda_client.update_function_configuration(
+                    FunctionName=function_name,
+                    MemorySize=config.memory_size,
+                    EphemeralStorage={'Size': config.storage_size},
+                    VpcConfig={
+                        'SubnetIds': config.subnet_ids,
+                        'SecurityGroupIds': config.security_group_ids
+                    }
+                )
+
+        return {"message": f"Deployed {config.number_of_functions} functions successfully"}
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/invoke-lambda")
-async def invoke_lambda(function_name: str):
+async def invoke_lambda(function_name: str, region: Optional[str] = None):
     try:
         # Initialize boto3 Lambda client
-        region = "us-west-2"  # Change to your desired region
+        region = region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
         lambda_client = boto3.client('lambda', region_name=region)
         
         # Invoke the Lambda function
@@ -309,23 +446,109 @@ async def invoke_lambda(function_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/list-lambda-functions")
-async def list_lambda_functions():
+@app.post("/invoke-multiple-functions")
+async def invoke_multiple_functions(config: InvokeConfig):
     try:
-        # Initialize boto3 Lambda client
-        region = "us-west-2"  # Change to your desired region
+        # Initialize AWS clients
+        region = config.region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
         lambda_client = boto3.client('lambda', region_name=region)
-        
-        # List Lambda functions
-        response = lambda_client.list_functions()
-        functions = response['Functions']
+        logs_client = boto3.client('logs', region_name=region)
+        cloudwatch_client = boto3.client('cloudwatch', region_name=region)
+        sns_client = boto3.client('sns', region_name=region)
+        sns_topic_arn = os.getenv("SNS_TOPIC_ARN")
 
-        # Extract function names
+        responses = []
+
+        for i in range(config.number_of_functions):
+            function_name = f"{config.function_name_prefix}-{i}"
+            try:
+                response = lambda_client.invoke(
+                    FunctionName=function_name,
+                    InvocationType='RequestResponse',
+                    Payload=json.dumps(config.payload)
+                )
+                
+                # Parse the response
+                response_payload = response['Payload'].read().decode('utf-8')
+                response_data = json.loads(response_payload)
+                responses.append(response_data)
+
+                # Log the invocation to CloudWatch
+                log_group_name = f"/aws/lambda/{function_name}"
+                log_stream_name = f"{function_name}-invocation"
+                logs_client.create_log_stream(
+                    logGroupName=log_group_name,
+                    logStreamName=log_stream_name
+                )
+                logs_client.put_log_events(
+                    logGroupName=log_group_name,
+                    logStreamName=log_stream_name,
+                    logEvents=[
+                        {
+                            'timestamp': int(time.time() * 1000),
+                            'message': json.dumps(response_data)
+                        }
+                    ]
+                )
+
+                # Create custom CloudWatch metric
+                cloudwatch_client.put_metric_data(
+                    Namespace='LambdaInvocations',
+                    MetricData=[
+                        {
+                            'MetricName': 'InvocationCount',
+                            'Dimensions': [
+                                {
+                                    'Name': 'FunctionName',
+                                    'Value': function_name
+                                },
+                            ],
+                            'Unit': 'Count',
+                            'Value': 1
+                        }
+                    ]
+                )
+
+            except lambda_client.exceptions.ResourceNotFoundException:
+                sns_client.publish(
+                    TopicArn=sns_topic_arn,
+                    Message=f"Function {function_name} not found during invocation.",
+                    Subject="Lambda Function Invocation Error"
+                )
+                raise HTTPException(status_code=500, detail=f"Function {function_name} not found.")
+            except Exception as e:
+                sns_client.publish(
+                    TopicArn=sns_topic_arn,
+                    Message=str(e),
+                    Subject="Lambda Function Invocation Error"
+                )
+                raise HTTPException(status_code=500, detail=str(e))
+
+        return {"message": f"Invoked {config.number_of_functions} functions successfully", "responses": responses}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/list-lambda-functions")
+async def list_lambda_functions(region: Optional[str] = None):
+    try:
+        if region:
+            lambda_client = boto3.client('lambda', region_name=region)
+            response = lambda_client.list_functions()
+            functions = response['Functions']
+        else:
+            lambda_client = boto3.client('lambda')
+            paginator = lambda_client.get_paginator('list_functions')
+            response_iterator = paginator.paginate()
+            functions = []
+            for response in response_iterator:
+                functions.extend(response['Functions'])
+
         function_names = [func['FunctionName'] for func in functions]
 
         return {"functions": function_names}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/delete-lambda-function")
 async def delete_lambda_function(function_name: str):
@@ -401,6 +624,193 @@ async def get_vpc_config():
         return {"vpc_config": mock_vpc_config}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/get-cost-and-usage")
+async def get_cost_and_usage(time_period: TimePeriod, metrics: List[str] = ["UnblendedCost"], granularity: str = "MONTHLY"):
+    try:
+        client = boto3.client('ce')
+        response = client.get_cost_and_usage(
+            TimePeriod={
+                'Start': time_period.Start,
+                'End': time_period.End
+            },
+            Granularity=granularity,
+            Metrics=metrics
+        )
+        return response['ResultsByTime']
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/describe-budget")
+async def describe_budget(budget_request: BudgetRequest):
+    try:
+        client = boto3.client('budgets')
+        response = client.describe_budget(
+            AccountId=budget_request.AccountId,
+            BudgetName=budget_request.BudgetName
+        )
+        return response['Budget']['CalculatedSpend']
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/describe-report-definitions")
+async def describe_report_definitions():
+    try:
+        client = boto3.client('cur')
+        response = client.describe_report_definitions()
+        return response['ReportDefinitions']
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/get-products")
+async def get_products(service_code: str, filters: List[dict]):
+    try:
+        client = boto3.client('pricing')
+        response = client.get_products(
+            ServiceCode=service_code,
+            Filters=filters
+        )
+        return response['PriceList']
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Assuming the cost optimization hub API is available
+@router.post("/get-savings-plans-coverage")
+async def get_savings_plans_coverage(time_period: TimePeriod):
+    try:
+        client = boto3.client('cost-optimization-hub')
+        response = client.get_savings_plans_coverage(
+            TimePeriod={
+                'Start': time_period.Start,
+                'End': time_period.End
+            }
+        )
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# Include the router in the FastAPI app instance
+app.include_router(router, prefix="/costs", tags=["Costs"])
+
+@router.get("/function-status/{function_name}")
+async def function_status(function_name: str, region: Optional[str] = None):
+    try:
+        region = region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+        lambda_client = boto3.client('lambda', region_name=region)
+        
+        response = lambda_client.get_function(FunctionName=function_name)
+        
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update-function-configuration")
+async def update_function_configuration(config: UpdateFunctionConfig):
+    try:
+        region = config.region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+        lambda_client = boto3.client('lambda', region_name=region)
+        
+        update_params = {
+            "FunctionName": config.function_name,
+        }
+
+        if config.memory_size:
+            update_params["MemorySize"] = config.memory_size
+        if config.timeout:
+            update_params["Timeout"] = config.timeout
+        if config.environment_variables:
+            update_params["Environment"] = {
+                'Variables': config.environment_variables
+            }
+        
+        response = lambda_client.update_function_configuration(**update_params)
+        
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/list-cloudwatch-metrics/{function_name}")
+async def list_cloudwatch_metrics(function_name: str, region: Optional[str] = None):
+    try:
+        region = region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+        cloudwatch_client = boto3.client('cloudwatch', region_name=region)
+        
+        response = cloudwatch_client.list_metrics(
+            Namespace='AWS/Lambda',
+            Dimensions=[
+                {
+                    'Name': 'FunctionName',
+                    'Value': function_name
+                }
+            ]
+        )
+        
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/list-cloudwatch-logs/{function_name}")
+async def list_cloudwatch_logs(function_name: str, region: Optional[str] = None):
+    try:
+        region = region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+        logs_client = boto3.client('logs', region_name=region)
+        
+        log_group_name = f"/aws/lambda/{function_name}"
+        
+        response = logs_client.describe_log_streams(logGroupName=log_group_name)
+        
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/get-function-errors/{function_name}")
+async def get_function_errors(function_name: str, region: Optional[str] = None):
+    try:
+        region = region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+        logs_client = boto3.client('logs', region_name=region)
+        
+        log_group_name = f"/aws/lambda/{function_name}"
+        
+        response = logs_client.filter_log_events(
+            logGroupName=log_group_name,
+            filterPattern='ERROR'
+        )
+        
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/list-all-functions")
+async def list_all_functions(region: Optional[str] = None):
+    try:
+        region = region or os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+        lambda_client = boto3.client('lambda', region_name=region)
+        
+        paginator = lambda_client.get_paginator('list_functions')
+        response_iterator = paginator.paginate()
+        
+        functions = []
+        for response in response_iterator:
+            functions.extend(response['Functions'])
+        
+        return {"functions": functions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+app.include_router(router, prefix="/management", tags=["Management"])
+
+@misc_router.get("/regions")
+async def list_regions():
+    try:
+        ec2_client = boto3.client('ec2')
+        response = ec2_client.describe_regions()
+        regions = response['Regions']
+        region_names = [region['RegionName'] for region in regions]
+        return {"regions": region_names}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+app.include_router(misc_router, prefix="/misc", tags=["Misc"])
 
 # Run the FastAPI app
 if __name__ == "__main__":

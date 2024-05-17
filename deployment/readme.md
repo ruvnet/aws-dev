@@ -1,4 +1,4 @@
-# Deployment Script README
+# Deployment Script 
 
 ## Usage
 
@@ -41,6 +41,8 @@ Deploys the provided Python script to AWS Lambda using Docker.
 - `image_tag` (string): The tag for the Docker image.
 - `python_script` (string): The Python script to deploy.
 - `requirements` (string): The requirements for the Python script.
+- `function_name` (string): The name for the Lambda function.
+- `region` (string, optional): The AWS region to deploy the function.
 - `vpc_id` (string, optional): The VPC ID for the Lambda function.
 - `subnet_ids` (list of strings, optional): The subnet IDs for the Lambda function.
 - `security_group_ids` (list of strings, optional): The security group IDs for the Lambda function.
@@ -50,6 +52,98 @@ Deploys the provided Python script to AWS Lambda using Docker.
 - `message` (string): Deployment status message.
 - `image_uri` (string): URI of the Docker image in ECR.
 - `lambda_arn` (string): ARN of the deployed Lambda function.
+
+### POST /advanced-deploy
+
+Deploys a Python application to AWS Lambda with advanced Docker build options.
+
+### POST /deploy-multiple-functions
+
+Deploys multiple Lambda functions using Docker containers.
+
+### POST /invoke-multiple-functions
+
+Invokes multiple Lambda functions with the given payload.
+
+### GET /invoke-lambda
+
+Invokes a specific Lambda function and returns the response.
+
+### GET /list-lambda-functions
+
+Lists all Lambda functions in a specified region or across all regions if no region is specified.
+
+### GET /list-all-functions
+
+Lists all Lambda functions across all regions.
+
+### DELETE /delete-lambda-function
+
+Deletes a specified Lambda function.
+
+### GET /list-ecr-repositories
+
+Lists all ECR repositories in a specified region.
+
+### DELETE /delete-ecr-repository
+
+Deletes a specified ECR repository.
+
+### POST /set-vpc-config
+
+Sets the VPC configuration for a Lambda function.
+
+### PUT /edit-vpc-config
+
+Edits the VPC configuration for a Lambda function.
+
+### GET /get-vpc-config
+
+Retrieves the VPC configuration for a Lambda function.
+
+### GET /regions
+
+Lists all available AWS regions.
+
+### POST /get-cost-and-usage
+
+Retrieves cost and usage information from AWS Cost Explorer.
+
+### POST /describe-budget
+
+Describes an AWS budget.
+
+### GET /describe-report-definitions
+
+Describes all report definitions from AWS Cost and Usage Reports.
+
+### POST /get-products
+
+Retrieves AWS pricing information.
+
+### POST /get-savings-plans-coverage
+
+Retrieves coverage information for AWS Savings Plans.
+
+### GET /function-status/{function_name}
+
+Retrieves the status of a specified Lambda function.
+
+### PUT /update-function-configuration
+
+Updates the configuration of a specified Lambda function.
+
+### GET /list-cloudwatch-metrics/{function_name}
+
+Lists CloudWatch metrics for a specified Lambda function.
+
+### GET /list-cloudwatch-logs/{function_name}
+
+Lists CloudWatch logs for a specified Lambda function.
+
+### GET /get-function-errors/{function_name}
+
+Retrieves error logs for a specified Lambda function from CloudWatch.
 
 ## Deployment Process
 
@@ -115,5 +209,4 @@ docker push <account_id>.dkr.ecr.us-west-2.amazonaws.com/my-ecr-repository:lates
 # Deploy Lambda function using the image from ECR
 aws lambda create-function --function-name my-lambda-function --package-type Image --code ImageUri=<account_id>.dkr.ecr.us-west-2.amazonaws.com/my-ecr-repository:latest --role arn:aws:iam::<account_id>:role/lambda-execution-role
 ```
-
-This detailed README provides usage instructions, API endpoints, and the deployment process for the script, ensuring clarity and ease of use.
+ 
