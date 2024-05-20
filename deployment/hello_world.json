@@ -1,9 +1,11 @@
 {
-  "repository_name": "hello-world-repo",
+  "repository_name": "hello-world-repo-2",
   "image_tag": "latest",
   "python_script": "def lambda_handler(event, context): return {\"statusCode\": 200, \"body\": \"Hello, world!\"}",
   "requirements": "",
-  "function_name": "HelloWorld",
+  "function_name": "HelloWorld2",
+  "memory_size": 128,
+  "storage_size": 512,
   "vpc_id": "",
   "subnet_ids": [],
   "security_group_ids": []

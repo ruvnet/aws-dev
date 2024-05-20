@@ -19,6 +19,8 @@ class DeployRequest(BaseModel):
     python_script: str
     requirements: str
     function_name: str
+    memory_size: Optional[int] = 128
+    storage_size: Optional[int] = 512  # Adding storage_size attribute
     region: Optional[str] = None
     vpc_id: Optional[str] = None
     subnet_ids: Optional[List[str]] = None
@@ -210,22 +212,22 @@ async def deploy(request: DeployRequest):
         function_name = request.function_name
         try:
             response = lambda_client.create_function(
-                FunctionName=function_name,
-                Role=role_arn,
-                Code={
-                    'ImageUri': f"{ecr_uri}/{image_name}"
-                },
-                PackageType='Image',
-                Publish=True,
-                MemorySize=request.memory_size if request.memory_size else 128,
-                EphemeralStorage={
-                    'Size': request.storage_size if request.storage_size else 512
-                },
-                VpcConfig={
-                    'SubnetIds': request.subnet_ids or [],
-                    'SecurityGroupIds': request.security_group_ids or []
-                } if request.vpc_id else {}
-            )
+            FunctionName=function_name,
+            Role=role_arn,
+            Code={
+                'ImageUri': f"{ecr_uri}/{image_name}"
+            },
+            PackageType='Image',
+            Publish=True,
+            MemorySize=request.memory_size if request.memory_size else 128,
+            EphemeralStorage={
+                'Size': request.storage_size if request.storage_size else 512
+            },
+            VpcConfig={
+                'SubnetIds': request.subnet_ids or [],
+                'SecurityGroupIds': request.security_group_ids or []
+            } if request.vpc_id else {}
+        )
         except lambda_client.exceptions.ResourceConflictException:
             response = lambda_client.update_function_code(
                 FunctionName=function_name,
